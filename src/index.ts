@@ -83,42 +83,27 @@ export default defineEndpoint({
         const issuerUrl = `${env['PUBLIC_URL']}/oauth`;
         logger.info('Setting OIDC Provider issuer URL to:', issuerUrl);
 
-        const oidc = new Provider(issuerUrl, {
-            clients: clients as any, // Type assertion para evitar problemas de tipado
-            
-            // Configuración de JWKS
-            ...(jwksKeys.length > 0 && { jwks: { keys: jwksKeys } }),            // Configuración de cookies
+        // Construir configuración del provider como any para permitir pkce
+        const providerConfig: any = {
+            clients: clients as any,
+            ...(jwksKeys.length > 0 && { jwks: { keys: jwksKeys } }),
             cookies: {
                 keys: cookieKeys,
-                long: { 
-                    signed: true, 
-                    httpOnly: true,
-                    sameSite: 'lax'
-                },
-                short: { 
-                    signed: true, 
-                    httpOnly: true,
-                    sameSite: 'lax'
-                },
-            },            // Características habilitadas
+                long: { signed: true, httpOnly: true, sameSite: 'lax' },
+                short: { signed: true, httpOnly: true, sameSite: 'lax' },
+            },
             features: {
                 devInteractions: { enabled: false }, // Deshabilitar interactions de desarrollo
                 resourceIndicators: { enabled: true },
                 revocation: { enabled: true },
                 introspection: { enabled: true },
-            },            // Políticas de validación personalizadas            // Configuración de clientDefaults para hacer PKCE opcional
-            clientDefaults: {
-                grant_types: ['authorization_code', 'refresh_token'],
-                response_types: ['code'],
-                scope: 'openid profile email',
-                token_endpoint_auth_method: 'client_secret_basic',
-                require_auth_time: false,
+                // Hacer PKCE opcional para todos los clientes
+                pkce: {
+                    methods: ['S256'],
+                    required: () => false,
+                },
             },
-
-            // Scopes disponibles
             scopes: ['openid', 'profile', 'email', 'offline_access'],
-
-            // Claims disponibles
             claims: {
                 openid: ['sub'],
                 profile: ['name', 'given_name', 'family_name', 'role'],
