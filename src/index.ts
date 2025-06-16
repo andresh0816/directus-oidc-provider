@@ -97,10 +97,10 @@ export default defineEndpoint({
                 resourceIndicators: { enabled: true },
                 revocation: { enabled: true },
                 introspection: { enabled: true },
-                // Hacer PKCE opcional para todos los clientes
+                // Configuración PKCE v9: habilitado pero no requerido
                 pkce: {
-                    methods: ['S256'],
-                    required: () => false,
+                    enabled: true,
+                    required: (_ctx: any, client: any) => false,
                 },
             },
             scopes: ['openid', 'profile', 'email', 'offline_access'],
@@ -255,7 +255,12 @@ export default defineEndpoint({
                     error_description: (error as any).error_description || error.message
                 };
             },
-        });// Configurar proxy para confiar en headers x-forwarded-*
+        };
+
+        // Instanciar el OIDC Provider
+        const oidc = new Provider(issuerUrl, providerConfig);
+
+        // Configurar proxy para confiar en headers x-forwarded-*
         oidc.proxy = true;
 
         // Solución directa: Sobreescribir la validación de PKCE para hacerla opcional
