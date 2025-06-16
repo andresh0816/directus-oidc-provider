@@ -218,8 +218,31 @@ export default defineEndpoint({
             logger.error('Grant error:', err);
         });
 
-        // Montar el provider OIDC
-        router.use('/oauth', oidc.callback());
+        // Definir rutas específicas ANTES del callback del OIDC provider
+        // Ruta de salud/health check
+        router.get('/oauth/health', (_req, res) => {
+            try {
+                res.json({ 
+                    status: 'healthy', 
+                    timestamp: new Date().toISOString(),
+                    issuer: oidc.issuer,
+                    discovery: `${env['PUBLIC_URL']}/oauth/.well-known/openid_configuration`
+                });
+            } catch (err) {
+                logger.error('Health check error:', err);
+                res.status(500).json({ error: 'Health check failed' });
+            }
+        });
+
+        // Ruta para obtener configuración del provider
+        router.get('/oauth/.well-known/openid_configuration', (_req, res) => {
+            try {
+                res.json(oidc.issuer);
+            } catch (err) {
+                logger.error('Configuration endpoint error:', err);
+                res.status(500).json({ error: 'Configuration unavailable' });
+            }
+        });
 
         // Ruta para obtener detalles de interacción
         router.get('/oauth/interaction/:uid', async (req, res) => {
@@ -291,30 +314,8 @@ export default defineEndpoint({
             }
         });
 
-        // Ruta para obtener configuración del provider
-        router.get('/oauth/.well-known/openid_configuration', (_req, res) => {
-            try {
-                res.json(oidc.issuer);
-            } catch (err) {
-                logger.error('Configuration endpoint error:', err);
-                res.status(500).json({ error: 'Configuration unavailable' });
-            }
-        });
-
-        // Ruta de salud/health check
-        router.get('/oauth/health', (_req, res) => {
-            try {
-                res.json({ 
-                    status: 'healthy', 
-                    timestamp: new Date().toISOString(),
-                    issuer: oidc.issuer,
-                    discovery: `${env['PUBLIC_URL']}/oauth/.well-known/openid_configuration`
-                });
-            } catch (err) {
-                logger.error('Health check error:', err);
-                res.status(500).json({ error: 'Health check failed' });
-            }
-        });
+        // Montar el provider OIDC al final para que no capture las rutas específicas
+        router.use('/oauth', oidc.callback());
 
         logger.info('OIDC Provider initialized successfully');
     }
