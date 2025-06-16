@@ -75,7 +75,10 @@ export default defineEndpoint({
 
         logger.info('Initializing OIDC Provider with clients:', clients.map(c => c.client_id));
 
-        const oidc = new Provider(env['PUBLIC_URL'], {
+        const issuerUrl = `${env['PUBLIC_URL']}/oauth`;
+        logger.info('Setting OIDC Provider issuer URL to:', issuerUrl);
+
+        const oidc = new Provider(issuerUrl, {
             clients: clients as any, // Type assertion para evitar problemas de tipado
             
             // Configuración de JWKS
@@ -218,7 +221,18 @@ export default defineEndpoint({
             logger.error('Grant error:', err);
         });
 
+        // Log the provider configuration
+        logger.info('OIDC Provider initialized with issuer:', oidc.issuer);
+
         // Definir rutas específicas ANTES del callback del OIDC provider
+        
+        // Debug middleware para ver qué requests llegan
+        router.use('/oauth', (req, _res, next) => {
+            logger.debug(`OIDC Request: ${req.method} ${req.path} - URL: ${req.url}`);
+            logger.debug('Request headers:', req.headers);
+            next();
+        });
+
         // Ruta de salud/health check
         router.get('/oauth/health', (_req, res) => {
             try {
@@ -226,21 +240,17 @@ export default defineEndpoint({
                     status: 'healthy', 
                     timestamp: new Date().toISOString(),
                     issuer: oidc.issuer,
-                    discovery: `${env['PUBLIC_URL']}/oauth/.well-known/openid_configuration`
+                    discovery: `${oidc.issuer}/.well-known/openid_configuration`,
+                    endpoints: {
+                        authorization: `${env['PUBLIC_URL']}/oauth/auth`,
+                        token: `${env['PUBLIC_URL']}/oauth/token`,
+                        userinfo: `${env['PUBLIC_URL']}/oauth/me`,
+                        jwks: `${env['PUBLIC_URL']}/oauth/jwks`,
+                    }
                 });
             } catch (err) {
                 logger.error('Health check error:', err);
                 res.status(500).json({ error: 'Health check failed' });
-            }
-        });
-
-        // Ruta para obtener configuración del provider
-        router.get('/oauth/.well-known/openid_configuration', (_req, res) => {
-            try {
-                res.json(oidc.issuer);
-            } catch (err) {
-                logger.error('Configuration endpoint error:', err);
-                res.status(500).json({ error: 'Configuration unavailable' });
             }
         });
 
@@ -315,6 +325,7 @@ export default defineEndpoint({
         });
 
         // Montar el provider OIDC al final para que no capture las rutas específicas
+        // Esto incluye automáticamente /.well-known/openid_configuration
         router.use('/oauth', oidc.callback());
 
         logger.info('OIDC Provider initialized successfully');
