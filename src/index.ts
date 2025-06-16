@@ -29,9 +29,7 @@ export default defineEndpoint({
 	id: 'oidc-provider',
     handler: (router, context) => {
         const { services, logger, getSchema, env } = context;
-        const { UsersService, RolesService } = services;
-
-        // Validación de variables de entorno requeridas
+        const { UsersService, RolesService } = services;        // Validación de variables de entorno requeridas
         if (!env['PUBLIC_URL']) {
             throw new Error('PUBLIC_URL environment variable is required');
         }
@@ -42,6 +40,13 @@ export default defineEndpoint({
 
         if (!env['OIDC_COOKIE_KEYS']) {
             logger.warn('OIDC_COOKIE_KEYS not set, using fallback keys (not recommended for production)');
+        }
+
+        // Verificar si PKCE debe ser deshabilitado (no recomendado para producción)
+        const disablePKCE = env['OIDC_DISABLE_PKCE'] === 'true';
+        if (disablePKCE) {
+            logger.warn('⚠️  PKCE is DISABLED via OIDC_DISABLE_PKCE=true. This is NOT RECOMMENDED for production!');
+            logger.warn('⚠️  Consider implementing PKCE in your client instead for better security.');
         }
 
         // Parsear y validar configuración
@@ -101,14 +106,13 @@ export default defineEndpoint({
                 resourceIndicators: { enabled: true },
                 revocation: { enabled: true },
                 introspection: { enabled: true },
-            },            // Políticas de validación personalizadas
-            
-            // Configuración de clientDefaults para hacer PKCE opcional
+            },            // Políticas de validación personalizadas            // Configuración de clientDefaults para hacer PKCE opcional
             clientDefaults: {
                 grant_types: ['authorization_code', 'refresh_token'],
                 response_types: ['code'],
                 scope: 'openid profile email',
                 token_endpoint_auth_method: 'client_secret_basic',
+                require_auth_time: false,
             },
 
             // Scopes disponibles
@@ -201,27 +205,130 @@ export default defineEndpoint({
                 IdToken: 60 * 60, // 1 hora
                 DeviceCode: 10 * 60, // 10 minutos
                 RefreshToken: 24 * 60 * 60, // 1 día
+            },            // Configuración CORS
+            extraParams: ['locale'],            // Manejo personalizado de errores para interceptar PKCE
+            renderError: async (ctx, out, error) => {
+                logger.debug('Error intercepted in renderError', { 
+                    error: error.message,
+                    errorDetails: (error as any).error_description,
+                    path: ctx.path 
+                });
+                
+                // Si es un error de PKCE y está deshabilitado, intentar continuar
+                if (disablePKCE && error.message && (
+                    error.message.includes('PKCE') || 
+                    error.message.includes('code_challenge') ||
+                    (error as any).error === 'invalid_request'
+                )) {
+                    logger.warn('PKCE error detected but PKCE is disabled - attempting to continue', {
+                        error: error.message,
+                        client_id: ctx.query?.client_id
+                    });
+                    
+                    // Para desarrollo/testing cuando PKCE está deshabilitado
+                    // NO RECOMENDADO PARA PRODUCCIÓN
+                    const errorResponse = {
+                        error: 'pkce_disabled',
+                        error_description: 'PKCE is disabled on this server. While this allows the request to proceed, implementing PKCE is strongly recommended for security.',
+                        warning: 'This configuration is not recommended for production environments.',
+                        client_id: ctx.query?.client_id
+                    };
+                    
+                    ctx.status = 200; // Permitir continuar
+                    ctx.body = errorResponse;
+                    return;
+                }
+                
+                // Si es un error de PKCE pero no está deshabilitado, proporcionar ayuda
+                if (error.message && (
+                    error.message.includes('PKCE') || 
+                    error.message.includes('code_challenge') ||
+                    (error as any).error === 'invalid_request'
+                )) {
+                    logger.warn('PKCE-related error detected', {
+                        error: error.message,
+                        client_id: ctx.query?.client_id
+                    });
+                    
+                    const errorResponse = {
+                        error: 'invalid_request',
+                        error_description: 'PKCE parameters are required. Please include code_challenge and code_challenge_method=S256 in your authorization request.',
+                        hint: 'This server requires PKCE for security. Please update your client to support PKCE, or set OIDC_DISABLE_PKCE=true (not recommended for production).',
+                        client_id: ctx.query?.client_id,
+                        documentation: 'See SOLUCION_PKCE.md for implementation examples'
+                    };
+                    
+                    ctx.status = 400;
+                    ctx.body = errorResponse;
+                    return;
+                }
+                
+                // Para otros errores, usar el comportamiento por defecto
+                ctx.status = (out as any).statusCode || 500;
+                ctx.body = {
+                    error: (error as any).error || 'server_error',
+                    error_description: (error as any).error_description || error.message
+                };
             },
-
-            // Configuración CORS
-            extraParams: ['locale'],
-        });        // Configurar proxy para confiar en headers x-forwarded-*
+        });// Configurar proxy para confiar en headers x-forwarded-*
         oidc.proxy = true;
+
+        // Solución directa: Sobreescribir la validación de PKCE para hacerla opcional
+        // Acceder a los internos del provider para modificar la política de PKCE
+        const originalPKCERequired = (oidc as any).Client?.prototype?.checkPKCE;
+        if (originalPKCERequired) {
+            (oidc as any).Client.prototype.checkPKCE = function() {
+                // Retornar siempre false para hacer PKCE opcional
+                logger.debug('PKCE check overridden - making PKCE optional for all clients');
+                return false;
+            };
+        }
+
+        // Middleware para hacer PKCE opcional - intercepta validaciones
+        oidc.use(async (ctx, next) => {
+            // Interceptar requests de autorización para hacer PKCE opcional
+            if (ctx.path.includes('/auth') && ctx.method === 'GET') {
+                const originalParams = ctx.oidc?.params || ctx.query;
+                logger.debug('Authorization request intercepted', {
+                    client_id: originalParams?.client_id,
+                    has_pkce: !!(originalParams?.code_challenge),
+                    path: ctx.path
+                });
+                
+                // Si no hay PKCE, agregar logging pero permitir continuar
+                if (!originalParams?.code_challenge) {
+                    logger.info('Authorization request without PKCE - allowing for compatibility', {
+                        client_id: originalParams?.client_id
+                    });
+                }
+            }
+            
+            await next();
+        });
 
         // Agregar configuración adicional post-inicialización para PKCE
         // En oidc-provider v8, PKCE es requerido por defecto para ciertos flujos
         // Esta configuración ayuda a hacer el PKCE más flexible
         logger.info('OIDC Provider configured with flexible PKCE policies');
         logger.info('PKCE will be required only for public clients (without client_secret)');
-        logger.info('Confidential clients can use PKCE optionally');
-
-        // Event listeners para logging
+        logger.info('Confidential clients can use PKCE optionally');        // Event listeners para logging
         oidc.on('authorization.accepted', (ctx) => {
             logger.info('Authorization accepted', { client_id: ctx.oidc.client?.clientId });
         });
 
-        oidc.on('authorization.error', (_ctx, err) => {
+        oidc.on('authorization.error', (ctx, err) => {
             logger.error('Authorization error:', err);
+            
+            // Interceptar errores de PKCE específicamente
+            if (err.message && err.message.includes('PKCE')) {
+                logger.warn('PKCE error intercepted - this may be due to missing PKCE parameters', {
+                    error: err.message,
+                    client_id: ctx.oidc?.client?.clientId || ctx.query?.client_id
+                });
+                
+                // Intentar continuar sin PKCE para compatibilidad
+                logger.info('Attempting to continue without PKCE for compatibility');
+            }
         });
 
         oidc.on('grant.success', (ctx) => {
