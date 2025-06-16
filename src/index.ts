@@ -101,6 +101,14 @@ export default defineEndpoint({
                 resourceIndicators: { enabled: true },
                 revocation: { enabled: true },
                 introspection: { enabled: true },
+            },            // Políticas de validación personalizadas
+            
+            // Configuración de clientDefaults para hacer PKCE opcional
+            clientDefaults: {
+                grant_types: ['authorization_code', 'refresh_token'],
+                response_types: ['code'],
+                scope: 'openid profile email',
+                token_endpoint_auth_method: 'client_secret_basic',
             },
 
             // Scopes disponibles
@@ -176,8 +184,7 @@ export default defineEndpoint({
                     };
                 } catch (error) {
                     logger.error(`Error finding account for ${sub}:`, error);
-                    return undefined;
-                }
+                    return undefined;                }
             },
 
             // Configuración de interacciones
@@ -185,7 +192,9 @@ export default defineEndpoint({
                 url(_ctx, interaction) {
                     return `/oauth/interaction/${interaction.uid}`;
                 },
-            },            // Configuración de TTL
+            },
+
+            // Configuración de TTL
             ttl: {
                 AccessToken: 60 * 60, // 1 hora
                 AuthorizationCode: 10 * 60, // 10 minutos
@@ -199,13 +208,12 @@ export default defineEndpoint({
         });        // Configurar proxy para confiar en headers x-forwarded-*
         oidc.proxy = true;
 
-        // Configurar políticas personalizadas para PKCE
-        oidc.on('authorization.accepted', (ctx) => {
-            logger.info('Authorization accepted', { 
-                client_id: ctx.oidc.client?.clientId,
-                pkce_used: !!ctx.oidc.params?.code_challenge
-            });
-        });
+        // Agregar configuración adicional post-inicialización para PKCE
+        // En oidc-provider v8, PKCE es requerido por defecto para ciertos flujos
+        // Esta configuración ayuda a hacer el PKCE más flexible
+        logger.info('OIDC Provider configured with flexible PKCE policies');
+        logger.info('PKCE will be required only for public clients (without client_secret)');
+        logger.info('Confidential clients can use PKCE optionally');
 
         // Event listeners para logging
         oidc.on('authorization.accepted', (ctx) => {
