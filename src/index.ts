@@ -324,6 +324,41 @@ export default defineEndpoint({
             }
         });
 
+        // Ruta específica para el discovery document
+        router.get('/oauth/.well-known/openid_configuration', async (_req, res) => {
+            try {
+                logger.debug('Serving OpenID Connect discovery document');
+                
+                const discovery = {
+                    issuer: oidc.issuer,
+                    authorization_endpoint: `${oidc.issuer}/auth`,
+                    token_endpoint: `${oidc.issuer}/token`,
+                    userinfo_endpoint: `${oidc.issuer}/me`,
+                    jwks_uri: `${oidc.issuer}/jwks`,
+                    introspection_endpoint: `${oidc.issuer}/token/introspection`,
+                    revocation_endpoint: `${oidc.issuer}/token/revocation`,
+                    end_session_endpoint: `${oidc.issuer}/session/end`,
+                    registration_endpoint: `${oidc.issuer}/reg`,
+                    scopes_supported: ['openid', 'profile', 'email', 'offline_access'],
+                    response_types_supported: ['code', 'id_token', 'code id_token'],
+                    response_modes_supported: ['query', 'fragment', 'form_post'],
+                    grant_types_supported: ['authorization_code', 'refresh_token'],
+                    subject_types_supported: ['public'],
+                    id_token_signing_alg_values_supported: ['RS256'],
+                    token_endpoint_auth_methods_supported: ['client_secret_basic', 'client_secret_post'],
+                    claims_supported: ['sub', 'name', 'given_name', 'family_name', 'email', 'email_verified', 'role'],
+                    code_challenge_methods_supported: ['S256'],
+                    request_parameter_supported: true,
+                    request_uri_parameter_supported: false,
+                };
+
+                res.json(discovery);
+            } catch (err) {
+                logger.error('Discovery document error:', err);
+                res.status(500).json({ error: 'Failed to serve discovery document' });
+            }
+        });
+
         // Montar el provider OIDC al final para que no capture las rutas específicas
         // Esto incluye automáticamente /.well-known/openid_configuration
         router.use('/oauth', oidc.callback());
