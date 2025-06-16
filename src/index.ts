@@ -82,9 +82,7 @@ export default defineEndpoint({
             clients: clients as any, // Type assertion para evitar problemas de tipado
             
             // Configuración de JWKS
-            ...(jwksKeys.length > 0 && { jwks: { keys: jwksKeys } }),
-            
-            // Configuración de cookies
+            ...(jwksKeys.length > 0 && { jwks: { keys: jwksKeys } }),            // Configuración de cookies
             cookies: {
                 keys: cookieKeys,
                 long: { 
@@ -97,9 +95,7 @@ export default defineEndpoint({
                     httpOnly: true,
                     sameSite: 'lax'
                 },
-            },
-
-            // Características habilitadas
+            },            // Características habilitadas
             features: {
                 devInteractions: { enabled: false }, // Deshabilitar interactions de desarrollo
                 resourceIndicators: { enabled: true },
@@ -189,9 +185,7 @@ export default defineEndpoint({
                 url(_ctx, interaction) {
                     return `/oauth/interaction/${interaction.uid}`;
                 },
-            },
-
-            // Configuración de TTL
+            },            // Configuración de TTL
             ttl: {
                 AccessToken: 60 * 60, // 1 hora
                 AuthorizationCode: 10 * 60, // 10 minutos
@@ -202,6 +196,15 @@ export default defineEndpoint({
 
             // Configuración CORS
             extraParams: ['locale'],
+        });        // Configurar proxy para confiar en headers x-forwarded-*
+        oidc.proxy = true;
+
+        // Configurar políticas personalizadas para PKCE
+        oidc.on('authorization.accepted', (ctx) => {
+            logger.info('Authorization accepted', { 
+                client_id: ctx.oidc.client?.clientId,
+                pkce_used: !!ctx.oidc.params?.code_challenge
+            });
         });
 
         // Event listeners para logging
