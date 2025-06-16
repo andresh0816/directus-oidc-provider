@@ -26,7 +26,7 @@ interface OIDCClient {
 }
 
 export default defineEndpoint({
-    id: "oauth",
+	id: 'oidc-provider',
     handler: (router, context) => {
         const { services, logger, getSchema, env } = context;
         const { UsersService, RolesService } = services;
